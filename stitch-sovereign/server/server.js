@@ -15,7 +15,7 @@ const PORT = process.env.PORT || 3001;
 
 // Middleware
 const corsOptions = {
-  origin: process.env.FRONTEND_URL || 'blessedalterations.com',
+  origin: process.env.FRONTEND_URL || 'https://blessedalterations.com',
   credentials: true
 };
 app.use(cors(corsOptions));
