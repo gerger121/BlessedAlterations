@@ -1,9 +1,11 @@
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import Database from 'better-sqlite3';
 import { body, validationResult } from 'express-validator';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import nodemailer from 'nodemailer';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -12,8 +14,53 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Middleware
-app.use(cors());
+const corsOptions = {
+  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  credentials: true
+};
+app.use(cors(corsOptions));
 app.use(express.json());
+
+// Email configuration from environment variables
+const OWNER_EMAIL = process.env.OWNER_EMAIL;
+const EMAIL_USER = process.env.EMAIL_USER;
+const EMAIL_PASS = process.env.EMAIL_PASS;
+
+// Validate required environment variables
+if (!OWNER_EMAIL || !EMAIL_USER || !EMAIL_PASS) {
+  console.warn('⚠️  Warning: Email environment variables not set. Email notifications will be disabled.');
+  console.warn('   Required: OWNER_EMAIL, EMAIL_USER, EMAIL_PASS');
+}
+
+// Create email transporter
+const transporter = (EMAIL_USER && EMAIL_PASS) ? nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: EMAIL_USER,
+    pass: EMAIL_PASS
+  }
+}) : null;
+
+// Email sending helper function
+async function sendEmailNotification(subject, htmlContent) {
+  if (!transporter || !OWNER_EMAIL) {
+    console.log('Email notifications disabled - missing configuration');
+    return false;
+  }
+  try {
+    await transporter.sendMail({
+      from: EMAIL_USER,
+      to: OWNER_EMAIL,
+      subject: subject,
+      html: htmlContent
+    });
+    console.log('Email notification sent to', OWNER_EMAIL);
+    return true;
+  } catch (error) {
+    console.error('Failed to send email:', error.message);
+    return false;
+  }
+}
 
 // Initialize SQLite database
 const db = new Database(join(__dirname, 'blessed_alterations.db'));
@@ -30,6 +77,7 @@ db.exec(`
     message TEXT,
     preferred_date TEXT,
     preferred_time TEXT,
+    rush_order INTEGER DEFAULT 0,
     status TEXT DEFAULT 'pending',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
@@ -54,6 +102,14 @@ db.exec(`
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 `);
+
+// Add rush_order column if it doesn't exist (for existing databases)
+try {
+  db.exec(`ALTER TABLE appointments ADD COLUMN rush_order INTEGER DEFAULT 0`);
+  console.log('Added rush_order column to appointments table');
+} catch (e) {
+  // Column already exists, ignore error
+}
 
 // Validation rules
 const appointmentValidation = [
@@ -87,16 +143,49 @@ const handleValidationErrors = (req, res, next) => {
 // ============ APPOINTMENT ROUTES ============
 
 // Create appointment
-app.post('/api/appointments', appointmentValidation, handleValidationErrors, (req, res) => {
+app.post('/api/appointments', appointmentValidation, handleValidationErrors, async (req, res) => {
   try {
-    const { first_name, last_name, email, phone, service, message, preferred_date, preferred_time } = req.body;
+    const { first_name, last_name, email, phone, service, message, preferred_date, preferred_time, rush_order } = req.body;
     
     const stmt = db.prepare(`
-      INSERT INTO appointments (first_name, last_name, email, phone, service, message, preferred_date, preferred_time)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO appointments (first_name, last_name, email, phone, service, message, preferred_date, preferred_time, rush_order)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     
-    const result = stmt.run(first_name, last_name, email, phone || null, service, message || null, preferred_date || null, preferred_time || null);
+    const isRushOrder = rush_order ? 1 : 0;
+    const result = stmt.run(first_name, last_name, email, phone || null, service, message || null, preferred_date || null, preferred_time || null, isRushOrder);
+    
+    // Send email notification to owner
+    const rushLabel = isRushOrder ? '🚨 RUSH ORDER' : '';
+    const emailSubject = `${rushLabel} New Appointment Request from ${first_name} ${last_name}`.trim();
+    const emailHtml = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #2c3e50; border-bottom: 2px solid #b8956b; padding-bottom: 10px;">
+          ${isRushOrder ? '🚨 RUSH ORDER - ' : ''}New Appointment Request
+        </h2>
+        <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
+          <h3 style="color: #b8956b; margin-top: 0;">Customer Information</h3>
+          <p><strong>Name:</strong> ${first_name} ${last_name}</p>
+          <p><strong>Email:</strong> <a href="mailto:${email}">${email}</a></p>
+          <p><strong>Phone:</strong> ${phone || 'Not provided'}</p>
+          <p><strong>Service:</strong> ${service}</p>
+          ${isRushOrder ? '<p style="color: #e74c3c; font-weight: bold;">⚡ RUSH ORDER REQUESTED</p>' : ''}
+          ${preferred_date ? `<p><strong>Preferred Date:</strong> ${preferred_date}</p>` : ''}
+          ${preferred_time ? `<p><strong>Preferred Time:</strong> ${preferred_time}</p>` : ''}
+        </div>
+        ${message ? `
+        <div style="background: #fff; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
+          <h3 style="color: #b8956b; margin-top: 0;">Message</h3>
+          <p style="white-space: pre-wrap;">${message}</p>
+        </div>
+        ` : ''}
+        <p style="color: #666; font-size: 12px; margin-top: 20px;">
+          Received on ${new Date().toLocaleString()}
+        </p>
+      </div>
+    `;
+    
+    await sendEmailNotification(emailSubject, emailHtml);
     
     res.status(201).json({
       success: true,
@@ -199,7 +288,7 @@ app.delete('/api/appointments/:id', (req, res) => {
 // ============ CONTACT MESSAGE ROUTES ============
 
 // Create contact message
-app.post('/api/contact', contactValidation, handleValidationErrors, (req, res) => {
+app.post('/api/contact', contactValidation, handleValidationErrors, async (req, res) => {
   try {
     const { name, email, subject, message } = req.body;
     
@@ -209,6 +298,30 @@ app.post('/api/contact', contactValidation, handleValidationErrors, (req, res) =
     `);
     
     const result = stmt.run(name, email, subject || null, message);
+    
+    // Send email notification to owner
+    const emailSubject = `New Contact Message: ${subject || 'No Subject'}`;
+    const emailHtml = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #2c3e50; border-bottom: 2px solid #b8956b; padding-bottom: 10px;">
+          New Contact Message
+        </h2>
+        <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
+          <p><strong>From:</strong> ${name}</p>
+          <p><strong>Email:</strong> <a href="mailto:${email}">${email}</a></p>
+          <p><strong>Subject:</strong> ${subject || 'No Subject'}</p>
+        </div>
+        <div style="background: #fff; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
+          <h3 style="color: #b8956b; margin-top: 0;">Message</h3>
+          <p style="white-space: pre-wrap;">${message}</p>
+        </div>
+        <p style="color: #666; font-size: 12px; margin-top: 20px;">
+          Received on ${new Date().toLocaleString()}
+        </p>
+      </div>
+    `;
+    
+    await sendEmailNotification(emailSubject, emailHtml);
     
     res.status(201).json({
       success: true,

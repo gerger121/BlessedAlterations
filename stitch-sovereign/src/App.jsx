@@ -883,14 +883,15 @@ function ContactSection() {
     email: '',
     phone: '',
     service: 'Bespoke Suit',
-    message: ''
+    message: '',
+    rush_order: false
   })
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitStatus, setSubmitStatus] = useState(null)
 
   const handleChange = (e) => {
-    const { name, value } = e.target
-    setFormData(prev => ({ ...prev, [name]: value }))
+    const { name, value, type, checked } = e.target
+    setFormData(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }))
   }
 
   const handleSubmit = async (e) => {
@@ -907,7 +908,8 @@ function ContactSection() {
         email: '',
         phone: '',
         service: 'Bespoke Suit',
-        message: ''
+        message: '',
+        rush_order: false
       })
     } catch (error) {
       setSubmitStatus({ type: 'error', message: error.message || 'Failed to submit. Please try again.' })
@@ -1102,6 +1104,31 @@ function ContactSection() {
                     className="w-full px-4 py-3 border border-charcoal/20 focus:border-muted-gold focus:outline-none transition-colors resize-none"
                     placeholder="Tell us about your requirements..."
                   />
+                </div>
+
+                <div className={`p-4 border transition-all cursor-pointer ${
+                  formData.rush_order 
+                    ? 'border-muted-gold bg-muted-gold/10' 
+                    : 'border-charcoal/20 hover:border-charcoal/40'
+                }`}>
+                  <label className="flex items-center gap-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      name="rush_order"
+                      checked={formData.rush_order}
+                      onChange={handleChange}
+                      className="w-5 h-5 accent-muted-gold"
+                    />
+                    <div>
+                      <span className="font-medium text-charcoal flex items-center gap-2">
+                        <Clock className="w-4 h-4 text-muted-gold" />
+                        Rush Order
+                      </span>
+                      <p className="text-sm text-charcoal/60 mt-1">
+                        Need it faster? Select this option for priority service (additional fees may apply)
+                      </p>
+                    </div>
+                  </label>
                 </div>
 
                 <button
