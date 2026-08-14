@@ -1188,9 +1188,9 @@ function Footer() {
           <div>
             <h4 className="font-medium text-ivory mb-4">Hours</h4>
             <ul className="space-y-3 text-ivory/50 text-sm">
-              <li>Mon - Fri: 9am - 7pm</li>
-              <li>Saturday: 10am - 5pm</li>
-              <li>Sunday: By Appointment</li>
+              <li>Monday - Thursday: 11am - 8pm</li>
+              <li>Friday-Saturday: 10am - 9pm</li>
+              <li>Sunday: Closed</li>
             </ul>
           </div>
         </div>
